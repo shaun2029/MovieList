@@ -5,8 +5,8 @@ unit main;
 interface
 
 uses
-  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, Types,
-  httpsend, synacode, fpjson, jsonparser;
+  Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
+  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser;
 
 type
   TMovieInfo = record
@@ -16,12 +16,14 @@ type
     Actors: string;
     Plot: string;
     Rating: string;
+    Poster: string;
   end;
 
   { TfrmMain }
 
   TfrmMain = class(TForm)
     btnLoadMovieList: TButton;
+    imgPoster: TImage;
     lbMovieInfo: TLabel;
     lbxMovies: TListBox;
     dlgOpenFile: TOpenDialog;
@@ -37,10 +39,12 @@ type
   private
     MovieCache: TStringList;
 
+    function DownloadImage(const URL: string; Stream: TMemoryStream): boolean;
     function ExtractMovieInfo(const JSONString: string): TMovieInfo;
     function ExtractYearFromParentheses(var Input: string): Integer;
     function GetCachedMovieInfo(const Title: string; Year: integer): TMovieInfo;
     function GetMovieInfo(Title: string; Year: integer): string;
+    procedure LoadAndDisplayImage(const URL: string);
     function LoadCachedMovieInfo(const Title: string): TMovieInfo;
     procedure LoadCacheFromFile(const FileName: string);
     procedure MovieToggle(Sender: TObject);
@@ -151,11 +155,17 @@ begin
   Year := ExtractYearFromParentheses(MovieTitle);
 
   mmMovieInfo.Clear;
+  imgPoster.Picture.Clear;
   MovieInfo := GetCachedMovieInfo(MovieTitle, Year);
   lbMovieInfo.Caption := MovieInfo.Title;
   mmMovieInfo.Lines.Add('Actors: ' + MovieInfo.Actors);
   mmMovieInfo.Lines.Add(Format('Year: %s  Genre: %s  Rating: %s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Rating]));
   mmMovieInfo.Lines.Add('Plot: ' + MovieInfo.Plot);
+
+  if MovieInfo.Poster <> '' then
+  begin
+    LoadAndDisplayImage(MovieInfo.Poster);
+  end;
 end;
 
 procedure TfrmMain.lbxMoviesKeyPress(Sender: TObject; var Key: char);
@@ -231,6 +241,7 @@ begin
   MovieInfo.Actors := '';
   MovieInfo.Plot := '';
   MovieInfo.Rating := '';
+  MovieInfo.Poster := '';
 
   // Parse the JSON string
   JSONData := GetJSON(JSONString);
@@ -251,6 +262,7 @@ begin
       MovieInfo.Rating := TJSONObject(RatingsArray.Items[0]).Get('Value', '');
     end;
 
+    MovieInfo.Poster := JSONObject.Get('Poster', '');
   finally
     JSONData.Free;
   end;
@@ -283,6 +295,7 @@ begin
       MovieInfo.Actors := CachedData[2];
       MovieInfo.Plot := CachedData[3];
       MovieInfo.Rating := CachedData[4];
+      MovieInfo.Poster := CachedData[5];
     finally
       CachedData.Free;
     end;
@@ -295,7 +308,7 @@ procedure TfrmMain.SaveMovieInfoToCache(const MovieInfo: TMovieInfo);
 var
   CacheData: string;
 begin
-  CacheData := Format('%s|%s|%s|%s|%s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Actors, MovieInfo.Plot, MovieInfo.Rating]);
+  CacheData := Format('%s|%s|%s|%s|%s|%s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Actors, MovieInfo.Plot, MovieInfo.Rating, MovieInfo.Poster]);
   MovieCache.Values[MovieInfo.Title] := CacheData;
 end;
 
@@ -359,6 +372,51 @@ begin
     end;
 
     Input := Trim(Copy(Input, 1, StartPos - 1) + Copy(Input, EndPos + 1, Length(Input)));
+  end;
+end;
+
+function TfrmMain.DownloadImage(const URL: string; Stream: TMemoryStream): boolean;
+var
+  HTTPClient: THTTPSend;
+begin
+  Result := False;
+  HTTPClient := THTTPSend.Create;
+  try
+    try
+      HTTPClient.Sock.OnStatus := nil; // Disable status updates if not needed
+      HTTPClient.HTTPMethod('GET', URL);
+
+      if HTTPClient.ResultCode = 200 then
+      begin
+        Stream.LoadFromStream(HTTPClient.Document);
+        Result := True;
+      end;
+    except
+    end;
+  finally
+    HTTPClient.Free;
+  end;
+end;
+
+procedure TfrmMain.LoadAndDisplayImage(const URL: string);
+var
+  ImageStream: TMemoryStream;
+begin
+  // Step 3: Download and display the image
+  ImageStream := TMemoryStream.Create;
+  imgPoster.Picture.Clear;
+  try
+    try
+      ImageStream.Position := 0; // Ensure stream is at the start
+      if DownloadImage(URL, ImageStream) then
+      begin
+        ImageStream.Position := 0;
+        imgPoster.Picture.LoadFromStream(ImageStream);
+      end;
+    except
+    end;
+  finally
+    ImageStream.Free;
   end;
 end;
 
