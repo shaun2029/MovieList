@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Movie List
+GenericName=Movie List
+Comment=Edit Movie List
+Keywords=Plaintext;Write;
+Exec=/usr/local/bin/MovieList
+Terminal=false
+Type=Application
+StartupNotify=true
+MimeType=text/plain;
+Icon=/usr/share/pixmaps/movielist.xpm
+Categories=Utility;

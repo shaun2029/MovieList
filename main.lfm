@@ -1,0 +1,69 @@
+object frmMain: TfrmMain
+  Left = 2644
+  Height = 660
+  Top = 179
+  Width = 742
+  Caption = 'Movie List'
+  ClientHeight = 660
+  ClientWidth = 742
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnShow = FormShow
+  Position = poScreenCenter
+  LCLVersion = '3.4.0.0'
+  object lbxMovies: TListBox
+    Left = 16
+    Height = 392
+    Top = 216
+    Width = 712
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    Font.Height = -19
+    ItemHeight = 0
+    ParentFont = False
+    Style = lbOwnerDrawFixed
+    TabOrder = 0
+    TopIndex = -1
+    OnClick = lbxMoviesClick
+    OnDblClick = lbxMoviesClick
+    OnDrawItem = lbxMoviesDrawItem
+    OnKeyPress = lbxMoviesKeyPress
+  end
+  object btnLoadMovieList: TButton
+    Left = 16
+    Height = 26
+    Top = 624
+    Width = 139
+    Anchors = [akLeft, akBottom]
+    Caption = 'Load Movie List'
+    TabOrder = 1
+    OnClick = btnLoadMovieListClick
+  end
+  object mmMovieInfo: TMemo
+    Left = 18
+    Height = 152
+    Top = 40
+    Width = 710
+    Font.Height = -16
+    Font.Name = 'Sans'
+    ParentFont = False
+    ScrollBars = ssAutoVertical
+    TabOrder = 2
+  end
+  object lbMovieInfo: TLabel
+    Left = 18
+    Height = 28
+    Top = 8
+    Width = 104
+    Caption = 'Movie Info:'
+    Font.Height = -20
+    Font.Name = 'Sans'
+    ParentFont = False
+  end
+  object dlgOpenFile: TOpenDialog
+    Title = 'Load Movie List'
+    DefaultExt = '.txt'
+    Options = [ofPathMustExist, ofFileMustExist, ofEnableSizing, ofViewDetail]
+    Left = 178
+    Top = 141
+  end
+end
