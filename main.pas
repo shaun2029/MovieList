@@ -40,10 +40,12 @@ type
     MovieCache: TStringList;
 
     function DownloadImage(const URL: string; Stream: TMemoryStream): boolean;
+    function EndsWithYear(var Title: string; out Year: Integer): Boolean;
     function ExtractMovieInfo(const JSONString: string): TMovieInfo;
     function ExtractYearFromParentheses(var Input: string): Integer;
     function GetCachedMovieInfo(const Title: string; Year: integer): TMovieInfo;
     function GetMovieInfo(Title: string; Year: integer): string;
+    function IsYear(const Str: string; out Year: Integer): Boolean;
     procedure LoadAndDisplayImage(const URL: string);
     function LoadCachedMovieInfo(const Title: string): TMovieInfo;
     procedure LoadCacheFromFile(const FileName: string);
@@ -153,6 +155,7 @@ begin
   MovieTitle := ChangeFileExt(lbxMovies.Items.Strings[Index], '');
 
   Year := ExtractYearFromParentheses(MovieTitle);
+  if Year < 1900 then EndsWithYear(MovieTitle, Year);
 
   mmMovieInfo.Clear;
   imgPoster.Picture.Clear;
@@ -308,8 +311,11 @@ procedure TfrmMain.SaveMovieInfoToCache(const MovieInfo: TMovieInfo);
 var
   CacheData: string;
 begin
-  CacheData := Format('%s|%s|%s|%s|%s|%s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Actors, MovieInfo.Plot, MovieInfo.Rating, MovieInfo.Poster]);
-  MovieCache.Values[MovieInfo.Title] := CacheData;
+  if MovieInfo.Title <> '' then
+  begin
+    CacheData := Format('%s|%s|%s|%s|%s|%s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Actors, MovieInfo.Plot, MovieInfo.Rating, MovieInfo.Poster]);
+    MovieCache.Values[MovieInfo.Title] := CacheData;
+  end;
 end;
 
 function TfrmMain.GetCachedMovieInfo(const Title: string; Year: integer): TMovieInfo;
@@ -419,6 +425,39 @@ begin
     ImageStream.Free;
   end;
 end;
+
+function TfrmMain.IsYear(const Str: string; out Year: Integer): Boolean;
+begin
+  // Assume a year is a four-digit number between 1900 and 2099
+  Result := (Length(Str) = 4) and TryStrToInt(Str, Year) and (Year >= 1900) and (Year <= 2099);
+end;
+
+function TfrmMain.EndsWithYear(var Title: string; out Year: Integer): Boolean;
+var
+  LastSegment: string;
+  SpacePos: Integer;
+begin
+  Result := False;
+  Year := 0;
+
+  // Trim leading and trailing whitespace
+  Title := Trim(Title);
+
+  // Find the position of the last space
+  SpacePos := LastDelimiter(' ', Title);
+
+  if SpacePos > 0 then
+  begin
+    // Extract the last segment after the last space
+    LastSegment := Copy(Title, SpacePos + 1, Length(Title) - SpacePos);
+    Title :=  Copy(Title, 1, SpacePos - 1);
+
+    // Check if the last segment is a valid year
+    if IsYear(LastSegment, Year) then
+      Result := True;
+  end;
+end;
+
 
 end.
 
