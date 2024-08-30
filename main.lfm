@@ -24,7 +24,7 @@ object frmMain: TfrmMain
     TabOrder = 0
     TopIndex = -1
     OnClick = lbxMoviesClick
-    OnDblClick = lbxMoviesClick
+    OnDblClick = lbxMoviesDblClick
     OnDrawItem = lbxMoviesDrawItem
     OnKeyPress = lbxMoviesKeyPress
   end
@@ -73,6 +73,10 @@ object frmMain: TfrmMain
     DefaultExt = '.txt'
     Options = [ofPathMustExist, ofFileMustExist, ofEnableSizing, ofViewDetail]
     Left = 178
+    Top = 141
+  end
+  object dlgOpenDirectory: TSelectDirectoryDialog
+    Left = 207
     Top = 141
   end
 end

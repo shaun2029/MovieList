@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser;
+  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser, Process;
 
 type
   TMovieInfo = record
@@ -28,11 +28,14 @@ type
     lbxMovies: TListBox;
     dlgOpenFile: TOpenDialog;
     mmMovieInfo: TMemo;
+    dlgOpenDirectory: TSelectDirectoryDialog;
     procedure btnLoadMovieListClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
+    procedure FormDblClick(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormShow(Sender: TObject);
     procedure lbxMoviesClick(Sender: TObject);
+    procedure lbxMoviesDblClick(Sender: TObject);
     procedure lbxMoviesDrawItem(Control: TWinControl; Index: Integer;
       ARect: TRect; State: TOwnerDrawState);
     procedure lbxMoviesKeyPress(Sender: TObject; var Key: char);
@@ -41,15 +44,19 @@ type
 
     function DownloadImage(const URL: string; Stream: TMemoryStream): boolean;
     function EndsWithYear(var Title: string; out Year: Integer): Boolean;
+    function ExtractFilePathFromLocation(const LocationStr: string): string;
     function ExtractMovieInfo(const JSONString: string): TMovieInfo;
     function ExtractYearFromParentheses(var Input: string): Integer;
     function GetCachedMovieInfo(const Title: string; Year: integer): TMovieInfo;
     function GetMovieInfo(Title: string; Year: integer): string;
+    procedure GetVideoFiles(const Folder: string; VideoFiles: TStrings);
+    function IsTitle(Index: Integer): boolean;
     function IsYear(const Str: string; out Year: Integer): Boolean;
     procedure LoadAndDisplayImage(const URL: string);
     function LoadCachedMovieInfo(const Title: string): TMovieInfo;
     procedure LoadCacheFromFile(const FileName: string);
     procedure MovieToggle(Sender: TObject);
+    procedure PlayMovie(const MovieFile: string);
     procedure SaveCacheToFile(const FileName: string);
     procedure SaveMovieInfoToCache(const MovieInfo: TMovieInfo);
     procedure UpdateMovieInfo(Index: Integer);
@@ -68,10 +75,17 @@ implementation
 { TfrmMain }
 
 procedure TfrmMain.btnLoadMovieListClick(Sender: TObject);
+var
+  Filename: string;
 begin
-  if dlgOpenFile.Execute then
+  if dlgOpenDirectory.Execute then
   begin
-    lbxMovies.Items.LoadFromFile(dlgOpenFile.FileName);
+    lbxMovies.Clear;
+    GetVideoFiles(dlgOpenDirectory.FileName, lbxMovies.Items);
+    lbxMovies.Sorted := True;
+    lbxMovies.Items.Insert(0, 'File Location: ' + dlgOpenDirectory.FileName);
+    Filename := GetAppConfigDir(False) + 'MovieFileList.txt';
+    lbxMovies.Items.SaveToFile(Filename)
   end;
 end;
 
@@ -85,6 +99,10 @@ begin
   CacheFileName := GetAppConfigDir(False) + 'MovieInfoCache.txt';
   if FileExists(CacheFileName) then
     LoadCacheFromFile(CacheFileName);
+end;
+
+procedure TfrmMain.FormDblClick(Sender: TObject);
+begin
 end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
@@ -123,6 +141,25 @@ begin
   end;
 end;
 
+procedure TfrmMain.lbxMoviesDblClick(Sender: TObject);
+var
+  Filename: String;
+begin
+  if (lbxMovies.ItemIndex >= 0) and not IsTitle(lbxMovies.ItemIndex) then
+  begin
+    try
+      Filename := ExtractFilePathFromLocation(lbxMovies.Items[0]) +  lbxMovies.Items[lbxMovies.ItemIndex];
+      PlayMovie(Filename)
+    except
+      on E: Exception do
+      begin
+        // Show the exception message in a dialog
+        ShowMessage('Error: ' + E.Message);
+      end;
+    end;
+  end;
+end;
+
 procedure TfrmMain.lbxMoviesDrawItem(Control: TWinControl; Index: Integer;
   ARect: TRect; State: TOwnerDrawState);
 var
@@ -135,7 +172,8 @@ begin
     if Trim(MovieTitle) <> '' then
     begin
       Font.Style := [];
-      if MovieTitle[1] = '-' then Font.Style := [fsStrikeOut];
+      if MovieTitle[1] = '-' then Font.Style := [fsStrikeOut]
+      else if MovieTitle[1] = '?' then Font.Style := [fsUnderline, fsItalic];
     end;
 
     // Clear the background
@@ -146,28 +184,65 @@ begin
   end;
 end;
 
+function TfrmMain.IsTitle(Index: Integer): boolean;
+begin
+  if (lbxMovies.ItemIndex >= 0) then
+    Result := (Pos('File Location:', lbxMovies.Items.Strings[Index]) = 1)
+  else Result := False;
+end;
+
+function TfrmMain.ExtractFilePathFromLocation(const LocationStr: string): string;
+const
+  Prefix = 'File Location: ';
+begin
+  // Check if the string starts with the expected prefix
+  if Pos(Prefix, LocationStr) = 1 then
+  begin
+    // Extract the path by removing the prefix
+    Result := Copy(LocationStr, Length(Prefix) + 1, Length(LocationStr) - Length(Prefix));
+
+    // Add directory separator if not present
+    if (Result <> '') and (Result[Length(Result)] <> DirectorySeparator) then
+    begin
+      Result := Result + DirectorySeparator;
+    end;
+  end
+  else
+  begin
+    // Return an empty string if the prefix doesn't match
+    Result := '';
+  end;
+end;
+
 procedure TfrmMain.UpdateMovieInfo(Index: Integer);
 var
   MovieTitle: string;
   MovieInfo: TMovieInfo;
   Year: integer;
 begin
-  MovieTitle := ChangeFileExt(lbxMovies.Items.Strings[Index], '');
-
-  Year := ExtractYearFromParentheses(MovieTitle);
-  if Year < 1900 then EndsWithYear(MovieTitle, Year);
-
   mmMovieInfo.Clear;
   imgPoster.Picture.Clear;
-  MovieInfo := GetCachedMovieInfo(MovieTitle, Year);
-  lbMovieInfo.Caption := MovieInfo.Title;
-  mmMovieInfo.Lines.Add('Actors: ' + MovieInfo.Actors);
-  mmMovieInfo.Lines.Add(Format('Year: %s  Genre: %s  Rating: %s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Rating]));
-  mmMovieInfo.Lines.Add('Plot: ' + MovieInfo.Plot);
+  lbMovieInfo.Caption := 'Movie Info:';
 
-  if MovieInfo.Poster <> '' then
+  if (lbxMovies.ItemIndex >= 0) and not IsTitle(Index) then
   begin
-    LoadAndDisplayImage(MovieInfo.Poster);
+    MovieTitle := ChangeFileExt(lbxMovies.Items.Strings[Index], '');
+    if (MovieTitle[1] = '-') or (MovieTitle[1] = '?') then
+      MovieTitle := Copy(MovieTitle, 2, Length(MovieTitle) - 1);
+
+    Year := ExtractYearFromParentheses(MovieTitle);
+    if Year < 1900 then EndsWithYear(MovieTitle, Year);
+
+    MovieInfo := GetCachedMovieInfo(MovieTitle, Year);
+    lbMovieInfo.Caption := MovieInfo.Title;
+    mmMovieInfo.Lines.Add('Actors: ' + MovieInfo.Actors);
+    mmMovieInfo.Lines.Add(Format('Year: %s  Genre: %s  Rating: %s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Rating]));
+    mmMovieInfo.Lines.Add('Plot: ' + MovieInfo.Plot);
+
+    if MovieInfo.Poster <> '' then
+    begin
+      LoadAndDisplayImage(MovieInfo.Poster);
+    end;
   end;
 end;
 
@@ -181,19 +256,23 @@ procedure TfrmMain.MovieToggle(Sender: TObject);
 var
   MovieTitle, Filename: string;
 begin
-  if lbxMovies.ItemIndex <> -1 then
+  if (lbxMovies.ItemIndex >= 0) and not IsTitle(lbxMovies.ItemIndex) then
   begin
-    MovieTitle := lbxMovies.Items.Strings[lbxMovies.ItemIndex];
-
-    if Trim(MovieTitle) <> '' then
+    if lbxMovies.ItemIndex <> -1 then
     begin
-      if MovieTitle[1] = '-' then MovieTitle := Copy(MovieTitle, 2, Length(MovieTitle) - 1)
-      else MovieTitle := '-' + MovieTitle;
-      lbxMovies.Items.Strings[lbxMovies.ItemIndex] := MovieTitle;
-    end;
+      MovieTitle := lbxMovies.Items.Strings[lbxMovies.ItemIndex];
 
-    Filename := GetAppConfigDir(False) + 'MovieFileList.txt';
-    lbxMovies.Items.SaveToFile(Filename)
+      if Trim(MovieTitle) <> '' then
+      begin
+        if MovieTitle[1] = '-' then MovieTitle[1] := '?'
+        else if MovieTitle[1] = '?' then MovieTitle := Copy(MovieTitle, 2, Length(MovieTitle) - 1)
+        else MovieTitle := '-' + MovieTitle;
+        lbxMovies.Items.Strings[lbxMovies.ItemIndex] := MovieTitle;
+      end;
+
+      Filename := GetAppConfigDir(False) + 'MovieFileList.txt';
+      lbxMovies.Items.SaveToFile(Filename)
+    end;
   end;
 end;
 
@@ -458,6 +537,79 @@ begin
   end;
 end;
 
+procedure TfrmMain.PlayMovie(const MovieFile: string);
+var
+  VLCPath: string;
+  VLCProcess: TProcess;
+begin
+  // Check for the standard VLC installation
+  if FileExists('/usr/bin/vlc') then
+    VLCPath := '/usr/bin/vlc'
+  // Check for VLC installed via Flatpak
+  else if (ExecuteProcess('/usr/bin/flatpak', ['--version']) = 0) and
+          (ExecuteProcess('/usr/bin/flatpak', ['info', 'org.videolan.VLC']) = 0) then
+    VLCPath := '/usr/bin/flatpak'
+  else
+  begin
+    raise Exception.Create('Error: VLC is not installed (neither as a standard package nor as a Flatpak).');
+    Exit;
+  end;
+
+  // Check if the movie file exists
+  if not FileExists(MovieFile) then
+  begin
+    raise Exception.Create('Error: Movie file "' +  MovieFile + '" not found.');
+    Exit;
+  end;
+
+  // Start VLC process with the movie file
+  VLCProcess := TProcess.Create(nil);
+  try
+    VLCProcess.Executable := VLCPath;
+    if VLCPath = '/usr/bin/flatpak' then
+      VLCProcess.Parameters.AddStrings(['run', 'org.videolan.VLC', MovieFile])
+    else
+      VLCProcess.Parameters.Add(MovieFile);
+
+    VLCProcess.Options := [poWaitOnExit]; // Wait for VLC to finish
+    VLCProcess.Execute;
+  finally
+    VLCProcess.Free;
+  end;
+end;
+
+procedure TfrmMain.GetVideoFiles(const Folder: string; VideoFiles: TStrings);
+var
+  SearchRec: TSearchRec;
+  FileMask, Extension: string;
+begin
+  // Check if the folder exists
+  if not DirectoryExists(Folder) then
+    raise Exception.Create('Directory does not exist: ' + Folder);
+
+  // File search mask (all files in the folder)
+  FileMask := Folder + DirectorySeparator + '*.*';
+
+  // Start searching for files
+  if FindFirst(FileMask, faAnyFile and not faDirectory, SearchRec) = 0 then
+  try
+    repeat
+      Extension := LowerCase(ExtractFileExt(SearchRec.Name));
+      // Check file extension and add to the list if it's a video file
+      if (LowerCase(Extension) = '.mp4') or
+         (LowerCase(Extension) = '.avi') or
+         (LowerCase(Extension) = '.mkv') or
+         (LowerCase(Extension) = '.mov') or
+         (LowerCase(Extension) = '.flv') or
+         (LowerCase(Extension) = '.wmv') then
+      begin
+        VideoFiles.Add(SearchRec.Name);
+      end;
+    until FindNext(SearchRec) <> 0;
+  finally
+    FindClose(SearchRec);
+  end;
+end;
 
 end.
 
