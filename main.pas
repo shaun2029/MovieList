@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser, Process;
+  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser, Process, Keys;
 
 type
   TMovieInfo = record
@@ -293,7 +293,7 @@ begin
       Title := Title + '&y=' + IntToStr(Year);
 
     // Construct the URL with your API key
-    URL := Format('http://www.omdbapi.com/?t=%s&apikey=myapikey', [Title]);
+    URL := Format('http://www.omdbapi.com/?t=%s&apikey=%s', [Title, APIKEY]);
 
     // Perform the HTTP GET request
     if HTTPSender.HTTPMethod('GET', URL) then

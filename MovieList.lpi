@@ -75,6 +75,11 @@
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
       </Unit>
+      <Unit>
+        <Filename Value="keys.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="Keys"/>
+      </Unit>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
