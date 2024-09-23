@@ -6,19 +6,9 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser, Process, Keys;
+  Types, ssl_openssl, httpsend, synacode, fpjson, jsonparser, Process, Keys, moviedb;
 
 type
-  TMovieInfo = record
-    Title: string;
-    Year: string;
-    Genre: string;
-    Actors: string;
-    Plot: string;
-    Rating: string;
-    Poster: string;
-  end;
-
   { TfrmMain }
 
   TfrmMain = class(TForm)
@@ -40,25 +30,23 @@ type
       ARect: TRect; State: TOwnerDrawState);
     procedure lbxMoviesKeyPress(Sender: TObject; var Key: char);
   private
-    MovieCache: TStringList;
+    FMovieDBFileName: string;
+    FMovieDB : TMovieDB;
 
     function DownloadImage(const URL: string; Stream: TMemoryStream): boolean;
     function EndsWithYear(var Title: string; out Year: Integer): Boolean;
     function ExtractFilePathFromLocation(const LocationStr: string): string;
     function ExtractMovieInfo(const JSONString: string): TMovieInfo;
+    function ExtractRatingsAsList(const JSONString: string): String;
     function ExtractYearFromParentheses(var Input: string): Integer;
-    function GetCachedMovieInfo(const Title: string; Year: integer): TMovieInfo;
+    function GetCachedMovieInfo(const FileTitle: string; Year: integer): TMovieInfo;
     function GetMovieInfo(Title: string; Year: integer): string;
     procedure GetVideoFiles(const Folder: string; VideoFiles: TStrings);
     function IsTitle(Index: Integer): boolean;
     function IsYear(const Str: string; out Year: Integer): Boolean;
     procedure LoadAndDisplayImage(const URL: string);
-    function LoadCachedMovieInfo(const Title: string): TMovieInfo;
-    procedure LoadCacheFromFile(const FileName: string);
     procedure MovieToggle(Sender: TObject);
     procedure PlayMovie(const MovieFile: string);
-    procedure SaveCacheToFile(const FileName: string);
-    procedure SaveMovieInfoToCache(const MovieInfo: TMovieInfo);
     procedure UpdateMovieInfo(Index: Integer);
 
   public
@@ -93,12 +81,8 @@ procedure TfrmMain.FormCreate(Sender: TObject);
 var
   CacheFileName: string;
 begin
-  MovieCache := TStringList.Create;
-
-  // Load the cache from the file
-  CacheFileName := GetAppConfigDir(False) + 'MovieInfoCache.txt';
-  if FileExists(CacheFileName) then
-    LoadCacheFromFile(CacheFileName);
+  FMovieDBFileName := GetAppConfigDir(False) + 'MovieInfo.db';
+  FMovieDB := TMovieDB.Create(FMovieDBFileName);
 end;
 
 procedure TfrmMain.FormDblClick(Sender: TObject);
@@ -106,13 +90,8 @@ begin
 end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
-var
-  CacheFileName: string;
 begin
-  // Save the cache to the file
-  CacheFileName := GetAppConfigDir(False) + 'MovieInfoCache.txt';
-  SaveCacheToFile(CacheFileName);
-  MovieCache.Free;
+  FMovieDB.Free;
 end;
 
 procedure TfrmMain.FormShow(Sender: TObject);
@@ -236,7 +215,8 @@ begin
     MovieInfo := GetCachedMovieInfo(MovieTitle, Year);
     lbMovieInfo.Caption := MovieInfo.Title;
     mmMovieInfo.Lines.Add('Actors: ' + MovieInfo.Actors);
-    mmMovieInfo.Lines.Add(Format('Year: %s  Genre: %s  Rating: %s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Rating]));
+    mmMovieInfo.Lines.Add(Format('Year: %d  Genre: %s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Ratings]));
+    mmMovieInfo.Lines.Add('Ratings:' + LineEnding + ExtractRatingsAsList(MovieInfo.Ratings));
     mmMovieInfo.Lines.Add('Plot: ' + MovieInfo.Plot);
 
     if MovieInfo.Poster <> '' then
@@ -318,11 +298,11 @@ var
 begin
   // Initialize the result with empty strings
   MovieInfo.Title := '';
-  MovieInfo.Year := '';
+  MovieInfo.Year := 0;
   MovieInfo.Genre := '';
   MovieInfo.Actors := '';
   MovieInfo.Plot := '';
-  MovieInfo.Rating := '';
+  MovieInfo.Ratings := '';
   MovieInfo.Poster := '';
 
   // Parse the JSON string
@@ -332,16 +312,16 @@ begin
 
     // Extract the required fields
     MovieInfo.Title := JSONObject.Get('Title', '');
-    MovieInfo.Year := JSONObject.Get('Year', '');
+    MovieInfo.Year := StrToIntDef(JSONObject.Get('Year', ''), -1);
     MovieInfo.Genre := JSONObject.Get('Genre', '');
     MovieInfo.Actors := JSONObject.Get('Actors', '');
     MovieInfo.Plot := JSONObject.Get('Plot', '');
 
-    // Extract the rating from the first element in the "Ratings" array
+    // Extract the Ratings from the first element in the "Ratings" array
     RatingsArray := TJSONArray(JSONObject.FindPath('Ratings'));
     if (RatingsArray <> nil) and (RatingsArray.Count > 0) then
     begin
-      MovieInfo.Rating := TJSONObject(RatingsArray.Items[0]).Get('Value', '');
+      MovieInfo.Ratings := RatingsArray.AsJSON;
     end;
 
     MovieInfo.Poster := JSONObject.Get('Poster', '');
@@ -352,85 +332,24 @@ begin
   Result := MovieInfo;
 end;
 
-function TfrmMain.LoadCachedMovieInfo(const Title: string): TMovieInfo;
-var
-  CacheIndex: Integer;
-  CachedData: TStringList;
-  MovieInfo: TMovieInfo;
-begin
-  // Initialize the result with empty strings
-  FillChar(MovieInfo, SizeOf(MovieInfo), 0);
-
-  // Search for the movie in the cache
-  CacheIndex := MovieCache.IndexOfName(Title);
-
-  if CacheIndex <> -1 then
-  begin
-    // Movie found in cache, extract its data
-    CachedData := TStringList.Create;
-    try
-      CachedData.AddDelimitedText(MovieCache.ValueFromIndex[CacheIndex], '|', True);
-
-      MovieInfo.Title := Title;
-      MovieInfo.Year := CachedData[0];
-      MovieInfo.Genre := CachedData[1];
-      MovieInfo.Actors := CachedData[2];
-      MovieInfo.Plot := CachedData[3];
-      MovieInfo.Rating := CachedData[4];
-      MovieInfo.Poster := CachedData[5];
-    finally
-      CachedData.Free;
-    end;
-  end;
-
-  Result := MovieInfo;
-end;
-
-procedure TfrmMain.SaveMovieInfoToCache(const MovieInfo: TMovieInfo);
-var
-  CacheData: string;
-begin
-  if MovieInfo.Title <> '' then
-  begin
-    CacheData := Format('%s|%s|%s|%s|%s|%s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Actors, MovieInfo.Plot, MovieInfo.Rating, MovieInfo.Poster]);
-    MovieCache.Values[MovieInfo.Title] := CacheData;
-  end;
-end;
-
-function TfrmMain.GetCachedMovieInfo(const Title: string; Year: integer): TMovieInfo;
+function TfrmMain.GetCachedMovieInfo(const FileTitle: string; Year: integer): TMovieInfo;
 var
   MovieInfo: TMovieInfo;
   JSONString: string;
 begin
-  // Try to load movie info from the cache
-  MovieInfo := LoadCachedMovieInfo(Title);
-
-  if MovieInfo.Title = '' then
+  // Try to load movie info from the database
+  if not FMovieDB.GetMovieInfo(FileTitle, Year, MovieInfo) then
   begin
     // If not found in cache, fetch from the API
-    JSONString := GetMovieInfo(Title, Year);
+    JSONString := GetMovieInfo(FileTitle, Year);
     MovieInfo := ExtractMovieInfo(JSONString);
-
+    MovieInfo.FileTitle := FileTitle;
     // Save the new movie info to the cache
-    SaveMovieInfoToCache(MovieInfo);
+    FMovieDB.SaveMovieInfo(MovieInfo);
   end;
 
   Result := MovieInfo;
 end;
-
-procedure TfrmMain.LoadCacheFromFile(const FileName: string);
-begin
-  if FileExists(FileName) then
-  begin
-    MovieCache.LoadFromFile(FileName);
-  end;
-end;
-
-procedure TfrmMain.SaveCacheToFile(const FileName: string);
-begin
-  MovieCache.SaveToFile(FileName);
-end;
-
 
 function TfrmMain.ExtractYearFromParentheses(var Input: string): Integer;
 var
@@ -513,7 +432,7 @@ end;
 
 function TfrmMain.EndsWithYear(var Title: string; out Year: Integer): Boolean;
 var
-  LastSegment: string;
+  LastSegment, NewTitle: string;
   SpacePos: Integer;
 begin
   Result := False;
@@ -529,11 +448,14 @@ begin
   begin
     // Extract the last segment after the last space
     LastSegment := Copy(Title, SpacePos + 1, Length(Title) - SpacePos);
-    Title :=  Copy(Title, 1, SpacePos - 1);
+    NewTitle :=  Copy(Title, 1, SpacePos - 1);
 
     // Check if the last segment is a valid year
     if IsYear(LastSegment, Year) then
+    begin
+      Title := NewTitle;
       Result := True;
+    end;
   end;
 end;
 
@@ -608,6 +530,53 @@ begin
     until FindNext(SearchRec) <> 0;
   finally
     FindClose(SearchRec);
+  end;
+end;
+
+function TfrmMain.ExtractRatingsAsList(const JSONString: string): String;
+var
+  JSONData: TJSONData;
+  JSONObj: TJSONObject;
+  RatingsArray: TJSONArray;
+  RatingsObj: TJSONObject;
+  RatingsList: TStringList;
+  i: Integer;
+  Ratingstring: string;
+begin
+  Result := '';
+  if JSONString = '' then Exit;
+
+  try
+    RatingsList := TStringList.Create;
+    // Parse the input JSON string
+    JSONData := GetJSON(JSONString);
+
+    // Cast to JSONObject to access its fields
+    if JSONData.JSONType = jtArray then
+    begin
+      // Extract the "Ratings" array
+      RatingsArray := TJSONArray(JSONData);
+
+      // Iterate through each element of the Ratings array
+      for i := 0 to RatingsArray.Count - 1 do
+      begin
+        RatingsObj := RatingsArray.Objects[i]; // Access each object in the array
+
+        // Format the Ratings as "Source: Value"
+        Ratingstring := Format('%s: %s', [
+          RatingsObj.Get('Source', 'Unknown Source'),
+          RatingsObj.Get('Value', 'Unknown Value')
+        ]);
+
+        // Add the formatted string to the list
+        RatingsList.Add(Ratingstring);
+      end;
+    end;
+
+    Result := RatingsList.Text;
+  finally
+    JSONData.Free;
+    RatingsList.Free;
   end;
 end;
 

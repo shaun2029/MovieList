@@ -80,6 +80,10 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="Keys"/>
       </Unit>
+      <Unit>
+        <Filename Value="moviedb.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
