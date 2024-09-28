@@ -5,11 +5,11 @@ unit moviedb;
 interface
 
 uses
-  SysUtils, SQLite3Conn, SQLDB, DB, Classes, Dialogs, sqldblib;
+  SysUtils, SQLite3Conn, SQLDB, DB, Classes, Dialogs, sqldblib, sqlite3dyn;
 
 type
   TMovieInfo = record
-    FileTitle: string;
+    FileName: string;
     Title: string;
     Year: integer;
     Genre: string;
@@ -33,7 +33,7 @@ type
     destructor Destroy; override;
 
     procedure SaveMovieInfo(const MovieInfo: TMovieInfo);
-    function GetMovieInfo(const FileTitle: string; Year: Integer; out MovieInfo: TMovieInfo): boolean;
+    function GetMovieInfo(const FileName: string; out MovieInfo: TMovieInfo): boolean;
   end;
 
 implementation
@@ -51,24 +51,9 @@ begin
   FConnection.DatabaseName := FDatabaseFile;
   FConnection.Transaction := FTransaction;
 
-  // Use TSQLDBLibraryLoader to dynamically load SQLite library
-  FLibLoader := TSQLDBLibraryLoader.Create(nil);
-  try
-    {$IFDEF MSWINDOWS}
-    Loader.LibraryName := 'sqlite3.dll'; // Path to SQLite DLL on Windows
-    {$ENDIF}
-    {$IFDEF LINUX}
-    FLibLoader.LibraryName := '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'; // Adjust path for Linux
-    {$ENDIF}
-    {$IFDEF DARWIN}
-    Loader.LibraryName := '/usr/local/lib/libsqlite3.dylib'; // Path for macOS
-    {$ENDIF}
-
-    FLibLoader.ConnectionType := 'SQLite3';
-    FLibLoader.Enabled := True;  // Enable loader to load the library
-  except
-    on E: Exception do
-      Writeln('An error occurred: ', E.Message);
+  if FileExists('/usr/lib/x86_64-linux-gnu/libsqlite3.so.0') then
+  begin
+    sqlite3dyn.SQLiteDefaultLibrary := '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0';
   end;
 
   // Create the database file if it doesn't exist
@@ -92,15 +77,15 @@ begin
     FTransaction.StartTransaction;
     FConnection.ExecuteDirect(
       'CREATE TABLE IF NOT EXISTS Movies (' +
-      'FileTitle TEXT NOT NULL, ' +
-      'Title TEXT NOT NULL, ' +
-      'Year INTEGER NOT NULL, ' +
+      'FileName TEXT NOT NULL, ' +
+      'Title TEXT, ' +
+      'Year INTEGER, ' +
       'Genre TEXT, ' +
       'Actors TEXT, ' +
       'Plot TEXT, ' +
       'Ratings TEXT, ' +
       'Poster TEXT, ' +
-      'PRIMARY KEY (FileTitle, Year));');
+      'PRIMARY KEY (FileName));');
     FTransaction.Commit;
   end
   else
@@ -120,11 +105,11 @@ begin
     SQLQuery.Transaction := FTransaction;
 
     // Prepare the insert query
-    SQLQuery.SQL.Text := 'INSERT INTO Movies (FileTitle, Title, Year, Genre, Actors, Plot, Ratings, Poster) ' +
-                         'VALUES (:FileTitle, :Title, :Year, :Genre, :Actors, :Plot, :Ratings, :Poster)';
+    SQLQuery.SQL.Text := 'INSERT INTO Movies (FileName, Title, Year, Genre, Actors, Plot, Ratings, Poster) ' +
+                         'VALUES (:FileName, :Title, :Year, :Genre, :Actors, :Plot, :Ratings, :Poster)';
 
     // Bind the parameters
-    SQLQuery.Params.ParamByName('FileTitle').AsString := MovieInfo.FileTitle;
+    SQLQuery.Params.ParamByName('FileName').AsString := MovieInfo.FileName;
     SQLQuery.Params.ParamByName('Title').AsString := MovieInfo.Title;
     SQLQuery.Params.ParamByName('Year').AsInteger := MovieInfo.Year;
     SQLQuery.Params.ParamByName('Genre').AsString := MovieInfo.Genre;
@@ -162,7 +147,7 @@ begin
   end;
 end;
 
-function TMovieDB.GetMovieInfo(const FileTitle: string; Year: Integer; out MovieInfo: TMovieInfo): boolean;
+function TMovieDB.GetMovieInfo(const FileName: string; out MovieInfo: TMovieInfo): boolean;
 var
   SQLQuery: TSQLQuery;
 begin
@@ -173,20 +158,15 @@ begin
   // Check if movie exists in the database
   SQLQuery := TSQLQuery.Create(nil);
   try
-    SQLQuery.SQL.Text := 'SELECT * FROM Movies WHERE FileTitle = :FileTitle COLLATE NOCASE';
-    if Year >= 1900 then
-    begin
-      SQLQuery.SQL.Add('AND Year = :Year');;
-      SQLQuery.Params.ParamByName('Year').AsInteger := Year;
-    end;
-    SQLQuery.Params.ParamByName('FileTitle').AsString := FileTitle;
+    SQLQuery.SQL.Text := 'SELECT * FROM Movies WHERE FileName = :FileName';
+    SQLQuery.Params.ParamByName('FileName').AsString := FileName;
 
     SQLQuery.DataBase := FConnection;
     SQLQuery.Open;
 
     if not SQLQuery.EOF then
     begin
-      MovieInfo.FileTitle := SQLQuery.FieldByName('FileTitle').AsString;
+      MovieInfo.FileName := SQLQuery.FieldByName('FileName').AsString;
       MovieInfo.Title := SQLQuery.FieldByName('Title').AsString;
       MovieInfo.Year := SQLQuery.FieldByName('Year').AsInteger;
       MovieInfo.Genre := SQLQuery.FieldByName('Genre').AsString;

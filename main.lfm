@@ -1,7 +1,7 @@
 object frmMain: TfrmMain
-  Left = 2644
+  Left = 2814
   Height = 660
-  Top = 179
+  Top = 315
   Width = 742
   Caption = 'Movie List'
   ClientHeight = 660

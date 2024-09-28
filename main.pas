@@ -39,8 +39,10 @@ type
     function ExtractMovieInfo(const JSONString: string): TMovieInfo;
     function ExtractRatingsAsList(const JSONString: string): String;
     function ExtractYearFromParentheses(var Input: string): Integer;
-    function GetCachedMovieInfo(const FileTitle: string; Year: integer): TMovieInfo;
-    function GetMovieInfo(Title: string; Year: integer): string;
+    function GetCachedMovieInfo(const Filename, FilenameTitle: string; Year: integer): TMovieInfo;
+    function GetFilename(Filename: string): string;
+    function GetFilenameTitle(Filename: string): string;
+    function GetMovieInfo(Title: string; Year: integer; out Found: boolean): string;
     procedure GetVideoFiles(const Folder: string; VideoFiles: TStrings);
     function IsTitle(Index: Integer): boolean;
     function IsYear(const Str: string; out Year: Integer): Boolean;
@@ -193,9 +195,21 @@ begin
   end;
 end;
 
+function TfrmMain.GetFilename(Filename:string): string;
+begin
+  Result := Filename;
+  if (Result[1] = '-') or (Result[1] = '?') then
+    Result := Copy(Result, 2, Length(Result) - 1);
+end;
+
+function TfrmMain.GetFilenameTitle(Filename:string): string;
+begin
+  Result := ChangeFileExt(Result, '');
+end;
+
 procedure TfrmMain.UpdateMovieInfo(Index: Integer);
 var
-  MovieTitle: string;
+  Filename, FilenameTitle: string;
   MovieInfo: TMovieInfo;
   Year: integer;
 begin
@@ -205,14 +219,13 @@ begin
 
   if (lbxMovies.ItemIndex >= 0) and not IsTitle(Index) then
   begin
-    MovieTitle := ChangeFileExt(lbxMovies.Items.Strings[Index], '');
-    if (MovieTitle[1] = '-') or (MovieTitle[1] = '?') then
-      MovieTitle := Copy(MovieTitle, 2, Length(MovieTitle) - 1);
+    Filename := GetFilename(lbxMovies.Items.Strings[Index]);
+    FilenameTitle := GetFilenameTitle(Filename);
 
-    Year := ExtractYearFromParentheses(MovieTitle);
-    if Year < 1900 then EndsWithYear(MovieTitle, Year);
+    Year := ExtractYearFromParentheses(FilenameTitle);
+    if Year < 1900 then EndsWithYear(FilenameTitle, Year);
 
-    MovieInfo := GetCachedMovieInfo(MovieTitle, Year);
+    MovieInfo := GetCachedMovieInfo(Filename, FilenameTitle, Year);
     lbMovieInfo.Caption := MovieInfo.Title;
     mmMovieInfo.Lines.Add('Actors: ' + MovieInfo.Actors);
     mmMovieInfo.Lines.Add(Format('Year: %d  Genre: %s', [MovieInfo.Year, MovieInfo.Genre, MovieInfo.Ratings]));
@@ -256,13 +269,14 @@ begin
   end;
 end;
 
-function TfrmMain.GetMovieInfo(Title: string; Year: integer): string;
+function TfrmMain.GetMovieInfo(Title: string; Year: integer; out Found: boolean): string;
 var
   HTTPSender: THTTPSend;
   URL: string;
   Response: TStringStream;
 begin
   Result := '';
+  Found := False;
   HTTPSender := THTTPSend.Create;
   Response := TStringStream.Create('');
   try
@@ -280,6 +294,8 @@ begin
     begin
       Response.CopyFrom(HTTPSender.Document, 0);
       Result := Response.DataString;
+
+      Found := True;
     end
     else
       Result := 'Error retrieving data';
@@ -332,20 +348,25 @@ begin
   Result := MovieInfo;
 end;
 
-function TfrmMain.GetCachedMovieInfo(const FileTitle: string; Year: integer): TMovieInfo;
+function TfrmMain.GetCachedMovieInfo(const Filename, FilenameTitle: string; Year: integer): TMovieInfo;
 var
   MovieInfo: TMovieInfo;
   JSONString: string;
+  Found: boolean;
 begin
   // Try to load movie info from the database
-  if not FMovieDB.GetMovieInfo(FileTitle, Year, MovieInfo) then
+  if not FMovieDB.GetMovieInfo(Filename, MovieInfo) then
   begin
     // If not found in cache, fetch from the API
-    JSONString := GetMovieInfo(FileTitle, Year);
-    MovieInfo := ExtractMovieInfo(JSONString);
-    MovieInfo.FileTitle := FileTitle;
-    // Save the new movie info to the cache
-    FMovieDB.SaveMovieInfo(MovieInfo);
+    JSONString := GetMovieInfo(FilenameTitle, Year, Found);
+    if (Found) then
+    begin
+      MovieInfo := ExtractMovieInfo(JSONString);
+      MovieInfo.FileName := FileName;
+
+      // Save the new movie info to the database
+      FMovieDB.SaveMovieInfo(MovieInfo);
+    end;
   end;
 
   Result := MovieInfo;
